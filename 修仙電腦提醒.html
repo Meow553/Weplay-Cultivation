@@ -332,16 +332,15 @@
 
         <div class="info">
             <strong>使用說明：</strong><br>
-            ✓ 點擊「開始」啟動每小時鬧鐘<br>
-            ✓ 每個整點時會提醒你（1:00~7:00 除外）<br>
+            ✓ 點擊「開始」啟動鬧鐘提醒<br>
             ✓ 首 1 分鐘：正常警報<br>
             ✓ 之後 1 分鐘：黃色快閃<br>
             ✓ 最後 30 秒：紅色閃爍<br>
-            ✓ <strong style="color: #e74c3c;">8:00 的警報響 20 分鐘</strong><br>
+            ✓ <strong style="color: #e74c3c;">7:55 開始響點結晶警報（20 分鐘）</strong><br>
             ✓ <strong style="color: #e74c3c;">1:00~7:00 不自動響鬧鐘</strong><br>
             ✓ 可勾選聲音提醒選項<br>
             ✓ 點擊「測試」立即測試警報<br>
-            ✓ 警報結束後自動計時下一個小時
+            ✓ 警報結束後自動計時下一個警報
         </div>
     </div>
 
@@ -350,8 +349,8 @@
             <h3>遊戲任務時間表</h3>
             <ul class="schedule-list">
                 <li>
-                    <span class="schedule-time">08:00</span>
-                    <span class="schedule-task">點結晶</span>
+                    <span class="schedule-time">07:55</span>
+                    <span class="schedule-task">點結晶 (20分鐘)</span>
                 </li>
                 <li>
                     <span class="schedule-time">11:00</span>
@@ -392,22 +391,21 @@
         let nextAlarmTime = null;
         let currentAlarmDuration = 2 * 60 * 1000; // 預設 2分鐘（毫秒）
         let currentTaskType = ''; // 記錄當前任務類型
-        const YELLOW_START = 60 * 1000; // 1分鐘後開始黃色閃爍
-        const RED_START = 90 * 1000; // 1分30秒後開始紅色閃爍
+        let lastAlarmCheckTime = null; // 記錄上次檢查的時間
 
         // 音頻上下文
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        let lastAlarmCheckMinute = -1;
 
-        // 任務時間表定義
+        // 任務時間表定義 - 使用分鐘數來存儲
+        // 格式：分鐘 => { task, duration }
         const taskSchedule = {
-            8: { task: '點結晶', duration: 20 * 60 * 1000 },
-            11: { task: '打靈泉', duration: 2 * 60 * 1000 },
-            13: { task: '打靈泉', duration: 2 * 60 * 1000 },
-            15: { task: '打靈泉', duration: 2 * 60 * 1000 },
-            17: { task: '打靈泉', duration: 2 * 60 * 1000 },
-            19: { task: '打靈泉', duration: 2 * 60 * 1000 },
-            21: { task: '打靈泉', duration: 2 * 60 * 1000 },
+            475: { task: '點結晶', duration: 20 * 60 * 1000 }, // 7:55 = 7*60+55 = 475
+            660: { task: '打靈泉', duration: 2 * 60 * 1000 },  // 11:00
+            780: { task: '打靈泉', duration: 2 * 60 * 1000 },  // 13:00
+            900: { task: '打靈泉', duration: 2 * 60 * 1000 },  // 15:00
+            1020: { task: '打靈泉', duration: 2 * 60 * 1000 }, // 17:00
+            1140: { task: '打靈泉', duration: 2 * 60 * 1000 }, // 19:00
+            1260: { task: '打靈泉', duration: 2 * 60 * 1000 }, // 21:00
         };
 
         const secretDungeonHours = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]; // 10點開始每小時
@@ -432,14 +430,14 @@
         }
 
         function isAlarmDisabledTime(hour) {
-            // 1:00~7:00 不自動響鬧鐘
-            return hour >= 1 && hour < 8;
+            // 1:00~7:00 不自動響鬧鐘（但7:55除外）
+            return hour >= 1 && hour < 7;
         }
 
-        function getTaskInfo(hour) {
-            // 返回該小時的任務信息
-            if (taskSchedule[hour]) {
-                return taskSchedule[hour];
+        function getTaskInfoByMinutes(totalMinutes) {
+            // 返回該時刻的任務信息
+            if (taskSchedule[totalMinutes]) {
+                return taskSchedule[totalMinutes];
             }
             return null;
         }
@@ -449,8 +447,8 @@
             return secretDungeonHours.includes(hour);
         }
 
-        function getAlarmDurationForHour(hour) {
-            const taskInfo = getTaskInfo(hour);
+        function getAlarmDurationForMinutes(totalMinutes) {
+            const taskInfo = getTaskInfoByMinutes(totalMinutes);
             if (taskInfo) {
                 return taskInfo.duration;
             }
@@ -459,33 +457,50 @@
 
         function checkAlarm(now) {
             const hour = now.getHours();
+            const minute = now.getMinutes();
+            const totalMinutes = hour * 60 + minute;
             
-            // 檢查是否到達整點
-            if (now.getMinutes() === 0 && now.getSeconds() === 0 && lastAlarmCheckMinute !== 0) {
-                lastAlarmCheckMinute = 0;
-                
-                // 檢查是否在禁用時間（1:00~7:00）
-                if (isAlarmDisabledTime(hour)) {
-                    console.log(`${hour}:00 在禁用時間，跳過警報`);
-                    return;
+            // 檢查是否到達特定的整點或特定時間點
+            const currentTime = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+            
+            // 檢查 7:55 的特殊時間
+            if (hour === 7 && minute === 55 && now.getSeconds() === 0) {
+                if (lastAlarmCheckTime !== currentTime) {
+                    lastAlarmCheckTime = currentTime;
+                    triggerAlarm(totalMinutes);
                 }
-                
-                triggerAlarm(hour);
-            } else if (now.getMinutes() !== 0) {
-                lastAlarmCheckMinute = -1;
+                return;
+            }
+            
+            // 檢查是否到達整點（分鐘 = 0）
+            if (minute === 0 && now.getSeconds() === 0) {
+                if (lastAlarmCheckTime !== currentTime) {
+                    lastAlarmCheckTime = currentTime;
+                    
+                    // 檢查是否在禁用時間（1:00~7:00）
+                    if (isAlarmDisabledTime(hour)) {
+                        console.log(`${hour}:00 在禁用時間，跳過警報`);
+                        return;
+                    }
+                    
+                    triggerAlarm(totalMinutes);
+                }
+            } else if (minute !== 0 || now.getSeconds() !== 0) {
+                lastAlarmCheckTime = null;
             }
         }
 
-        function triggerAlarm(hour = null) {
+        function triggerAlarm(totalMinutes = null) {
             alarmTriggered = true;
             alarmStartTime = Date.now();
             
-            // 根據小時設置警報時長和任務信息
-            if (hour !== null) {
-                const taskInfo = getTaskInfo(hour);
+            // 根據時間設置警報時長和任務信息
+            if (totalMinutes !== null) {
+                const taskInfo = getTaskInfoByMinutes(totalMinutes);
+                const hour = Math.floor(totalMinutes / 60);
                 const hasDungeon = hasSecretDungeonTask(hour);
                 
-                currentAlarmDuration = getAlarmDurationForHour(hour);
+                currentAlarmDuration = getAlarmDurationForMinutes(totalMinutes);
                 
                 const statusEl = document.getElementById('status');
                 const durationMinutes = currentAlarmDuration / (60 * 1000);
@@ -553,7 +568,7 @@
             body.classList.remove('flash-yellow', 'flash-red');
             stageIndicator.classList.remove('yellow', 'red');
 
-            // ��算階段閾值（按比例）
+            // 計算階段閾值（按比例）
             const yellowStartThreshold = currentAlarmDuration * 0.5; // 後半段開始黃色
             const redStartThreshold = currentAlarmDuration * 0.75; // 最後四分之一紅色
 
@@ -603,37 +618,44 @@
             }
 
             const now = new Date();
-            let nextHour = new Date(now);
-            
-            if (alarmTriggered) {
-                // 警報正在進行中，計算下一個有效的整點
-                nextHour.setHours(nextHour.getHours() + 1);
-            } else {
-                // 還沒有警報，如果現在不是整點，計算到下一個整點
-                if (now.getMinutes() !== 0 || now.getSeconds() !== 0) {
-                    nextHour.setHours(nextHour.getHours() + 1);
+            let nextTime = null;
+            let nextTimeMinutes = null;
+
+            // 所有報警時間點（分鐘）
+            const alarmTimes = [475, 660, 780, 900, 1020, 1140, 1260]; // 7:55, 11:00, 13:00, 15:00, 17:00, 19:00, 21:00
+            const currentTotalMinutes = now.getHours() * 60 + now.getMinutes();
+
+            // 尋找下一個報警時間
+            for (let alarmMinutes of alarmTimes) {
+                if (alarmMinutes > currentTotalMinutes) {
+                    nextTimeMinutes = alarmMinutes;
+                    break;
                 }
             }
-            
-            nextHour.setMinutes(0);
-            nextHour.setSeconds(0);
 
-            // 如果下一個整點在禁用時間，跳過到下一個有效時間
-            while (isAlarmDisabledTime(nextHour.getHours())) {
-                nextHour.setHours(nextHour.getHours() + 1);
+            // 如果沒有找到今天的下一個報警時間，設為明天的第一個
+            if (nextTimeMinutes === null) {
+                nextTime = new Date(now);
+                nextTime.setDate(nextTime.getDate() + 1);
+                nextTime.setHours(7, 55, 0);
+                nextTimeMinutes = 475;
+            } else {
+                nextTime = new Date(now);
+                nextTime.setHours(Math.floor(nextTimeMinutes / 60), nextTimeMinutes % 60, 0);
             }
 
-            const timeUntil = nextHour - now;
+            const timeUntil = nextTime - now;
             const hoursLeft = Math.floor(timeUntil / (1000 * 60 * 60));
             const minutesLeft = Math.floor((timeUntil % (1000 * 60 * 60)) / (1000 * 60));
             const secondsLeft = Math.floor((timeUntil % (1000 * 60)) / 1000);
 
-            const nextHourStr = String(nextHour.getHours()).padStart(2, '0') + ':' + 
-                              String(nextHour.getMinutes()).padStart(2, '0');
+            const nextHourStr = String(nextTime.getHours()).padStart(2, '0') + ':' + 
+                              String(nextTime.getMinutes()).padStart(2, '0');
 
             let taskInfo = '';
-            const task = getTaskInfo(nextHour.getHours());
-            const hasDungeon = hasSecretDungeonTask(nextHour.getHours());
+            const task = getTaskInfoByMinutes(nextTimeMinutes);
+            const nextHour = nextTime.getHours();
+            const hasDungeon = hasSecretDungeonTask(nextHour);
             
             if (task && hasDungeon) {
                 taskInfo = ` (${task.task} + 打秘境)`;
@@ -643,7 +665,7 @@
                 taskInfo = ' (打秘境)';
             }
 
-            const durationInfo = getAlarmDurationForHour(nextHour.getHours());
+            const durationInfo = getAlarmDurationForMinutes(nextTimeMinutes);
             const durationMinutes = durationInfo / (60 * 1000);
 
             document.getElementById('nextAlarmTime').textContent = 
@@ -654,7 +676,7 @@
             console.log('測試警報開始');
             if (!alarmTriggered) {
                 const now = new Date();
-                triggerAlarm(now.getHours());
+                triggerAlarm(now.getHours() * 60 + now.getMinutes());
                 const statusEl = document.getElementById('status');
                 statusEl.textContent = '測試模式：' + statusEl.textContent;
             }
@@ -682,7 +704,7 @@
 
         function startAlarm() {
             alarmActive = true;
-            document.getElementById('status').textContent = '鬧鐘已啟動，等待下一個整點';
+            document.getElementById('status').textContent = '鬧鐘已啟動，等待下一個警報時間';
             document.getElementById('status').classList.remove('active');
             document.getElementById('progressFill').style.width = '0%';
             console.log('鬧鐘已開始');
@@ -691,7 +713,7 @@
         function stopAlarm() {
             alarmActive = false;
             alarmTriggered = false;
-            lastAlarmCheckMinute = -1;
+            lastAlarmCheckTime = null;
             currentTaskType = '';
             currentAlarmDuration = 2 * 60 * 1000; // 重設為預設值
             document.getElementById('status').textContent = '鬧鐘已停止';
