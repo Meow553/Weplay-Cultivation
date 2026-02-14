@@ -83,7 +83,7 @@
         <p><strong>1. 點結晶提醒 (自動切換邏輯)：</strong></p>
         <ul>
             <li>週一至週六：07:55 觸發鬧鐘</li>
-            <li>週日固定：<span class="highlight">09:55</span> 觸發鬧鐘</li>
+            <li>週日固定：<span class="highlight">09:50</span> 觸發鬧鐘</li>
             <li>鬧鐘時長：20 分鐘 (其餘任務均為 2 分鐘)</li>
         </ul>
         
@@ -101,9 +101,9 @@
         </ul>
 
         <p style="margin-top: 10px;"><strong>4. 鬧鐘三階段提醒機制：</strong></p>
-        <div class="stage-box">第一階段 (0至1分鐘)：正常響鈴 (每 0.8s 響一次)</div>
-        <div class="stage-box" style="color:#d4a017">第二階段 (1分鐘至1.5分鐘)：黃色快閃 (每 0.5s 響一次)</div>
-        <div class="stage-box" style="color:red">第三階段 (1.5分鐘至結束)：紅色急閃 (每 0.3s 響一次)</div>
+        <div class="stage-box">第一階段 (0至10分鐘)：正常響鈴 (每 0.8s 響一次)</div>
+        <div class="stage-box" style="color:#d4a017">第二階段 (10至15分鐘)：黃色快閃 (每 0.5s 響一次)</div>
+        <div class="stage-box" style="color:red">第三階段 (15至20分鐘)：紅色急閃 (每 0.3s 響一次)</div>
     </div>
 
     <script>
@@ -121,7 +121,8 @@
         const secretDungeonHours = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
 
         function getCrystalMinutes(date) {
-            return date.getDay() === 0 ? 595 : 475;
+            // 週日 (0) 改為 9:50 (9*60 + 50 = 590)
+            return date.getDay() === 0 ? 590 : 475;
         }
 
         function isAlarmDisabled(date) {
@@ -175,7 +176,6 @@
             statusEl.classList.add('active');
             document.getElementById('dismissBtn').disabled = false;
             
-            // 觸發時立即檢查一次音效
             if (document.getElementById('soundToggle').checked) playSound();
         }
 
@@ -190,7 +190,6 @@
 
             document.body.classList.remove('flash-yellow', 'flash-red');
             
-            // 根據進度播放聲音與閃爍
             if (progress >= 75) {
                 document.body.classList.add('flash-red');
                 if (Math.floor(elapsed / 300) % 2 === 0) {
@@ -250,9 +249,7 @@
 
         function playSound() {
             try {
-                // 必須先恢復 AudioContext 以確保在部分瀏覽器能響鈴
                 if (audioContext.state === 'suspended') audioContext.resume();
-                
                 const osc = audioContext.createOscillator();
                 const gain = audioContext.createGain();
                 osc.connect(gain); gain.connect(audioContext.destination);
