@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>修仙計時器 - 狀態鎖定版</title>
+    <title>修仙計時器 - 專業鎖定版</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -13,6 +13,7 @@
             padding: 20px; gap: 20px;
         }
 
+        /* 警報閃爍動畫 */
         @keyframes yellow-flash { 0%, 100% { background: #ffeb3b; } 50% { background: #ffd700; } }
         @keyframes red-flash { 0%, 100% { background: #ff0000; } 50% { background: #cc0000; } }
         body.flash-yellow { animation: yellow-flash 0.5s infinite !important; }
@@ -20,13 +21,13 @@
 
         .container {
             background: rgba(255, 255, 255, 0.9); padding: 2.5rem; border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2); text-align: center; max-width: 500px; width: 100%;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2); text-align: center; max-width: 550px; width: 100%;
         }
 
         #timerDisplay { font-size: 5rem; font-weight: bold; color: #2d3436; margin-bottom: 0.5rem; font-family: 'Courier New', Courier, monospace; }
         
         .input-group { display: flex; justify-content: center; align-items: center; gap: 10px; margin-bottom: 20px; }
-        .input-group input { width: 70px; padding: 10px; font-size: 1.2rem; border: 2px solid #dfe6e9; border-radius: 10px; text-align: center; }
+        .input-group input { width: 80px; padding: 10px; font-size: 1.2rem; border: 2px solid #dfe6e9; border-radius: 10px; text-align: center; }
         .input-group input:disabled { background-color: #f1f2f6; color: #b2bec3; cursor: not-allowed; }
 
         .progress-container { width: 100%; height: 15px; background-color: #dfe6e9; border-radius: 8px; margin: 20px 0; overflow: hidden; }
@@ -46,6 +47,17 @@
         button:disabled { background-color: #bdc3c7; cursor: not-allowed; transform: none; }
 
         .sound-toggle { margin-bottom: 15px; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: bold; color: #2d3436; }
+
+        /* 說明區塊樣式 */
+        .info {
+            background: rgba(255, 255, 255, 0.85); padding: 1.5rem; border-radius: 15px;
+            font-size: 0.9rem; color: #2d3436; line-height: 1.7; max-width: 550px; width: 100%;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1); text-align: left;
+        }
+        .info h3 { border-bottom: 2px solid #6c5ce7; margin-bottom: 10px; padding-bottom: 5px; color: #6c5ce7; text-align: center; }
+        .info ul { margin-left: 20px; }
+        .highlight { color: #e74c3c; font-weight: bold; }
+        .stage-box { background: #eee; padding: 5px 10px; border-radius: 5px; margin-top: 5px; font-size: 0.85rem; }
     </style>
 </head>
 <body>
@@ -76,6 +88,27 @@
         </div>
     </div>
 
+    <div class="info">
+        <h3>計時器使用說明</h3>
+        <p><strong>1. 操作流程：</strong></p>
+        <ul>
+            <li><strong>設定</strong>：在輸入框填入分、秒。</li>
+            <li><strong>鎖定機制</strong>：點擊「開始」後，輸入欄位將變為灰色且<span class="highlight">無法修改</span>。</li>
+            <li><strong>暫停/重設</strong>：計時中可點擊「暫停」中斷，若要更改時間，必須先點擊「重設」。</li>
+        </ul>
+        
+        <p style="margin-top: 10px;"><strong>2. 響鈴機制 (時間到期)：</strong></p>
+        <ul>
+            <li>計時歸零後，系統自動開始為期 <span class="highlight">5 分鐘</span> 的警報。</li>
+            <li>背景將同步觸發三階段視覺提醒。</li>
+        </ul>
+
+        <p style="margin-top: 10px;"><strong>3. 三階段警報規則：</strong></p>
+        <div class="stage-box">第一階段 (0-50%): 正常響鈴 (每 0.8s 響一次)</div>
+        <div class="stage-box" style="color:#d4a017">第二階段 (50-75%): 黃色快閃 (每 0.5s 響一次)</div>
+        <div class="stage-box" style="color:red">第三階段 (75-100%): 紅色急閃 (每 0.3s 響一次)</div>
+    </div>
+
     <script>
         let countdownInterval = null;
         let alarmInterval = null;
@@ -84,7 +117,7 @@
         let isRunning = false;
         let isAlarming = false;
         let alarmStartTime = 0;
-        const ALARM_DURATION = 5 * 60 * 1000; // 5分鐘
+        const ALARM_DURATION = 5 * 60 * 1000; 
 
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
@@ -115,7 +148,6 @@
         function startTimer() {
             if (isRunning) return;
 
-            // 鎖定輸入
             document.getElementById('inputMin').disabled = true;
             document.getElementById('inputSec').disabled = true;
 
@@ -131,12 +163,11 @@
             isRunning = true;
             document.getElementById('startBtn').disabled = true;
             
-            // 切換按鈕為「暫停」
             const actionBtn = document.getElementById('actionBtn');
             actionBtn.textContent = "暫停";
             actionBtn.className = "btn-pause";
 
-            document.getElementById('status').textContent = "正在計時...";
+            document.getElementById('status').textContent = "計時中...";
             document.getElementById('status').classList.remove('active');
 
             countdownInterval = setInterval(() => {
@@ -152,7 +183,6 @@
         function handleAction() {
             const actionBtn = document.getElementById('actionBtn');
             if (actionBtn.textContent === "暫停") {
-                // 執行暫停
                 clearInterval(countdownInterval);
                 isRunning = false;
                 document.getElementById('startBtn').disabled = false;
@@ -160,7 +190,6 @@
                 actionBtn.className = "btn-reset";
                 document.getElementById('status').textContent = "已暫停";
             } else {
-                // 執行重設
                 resetTimer();
             }
         }
@@ -173,7 +202,6 @@
             document.getElementById('status').textContent = "時間到！響鈴中";
             document.getElementById('status').classList.add('active');
             
-            // 隱藏一般控制，顯示關閉響鈴
             document.getElementById('startBtn').style.display = "none";
             document.getElementById('actionBtn').style.display = "none";
             document.getElementById('stopAlarmBtn').style.display = "block";
@@ -207,7 +235,6 @@
             remainingSeconds = 0;
             totalSeconds = 0;
 
-            // 恢復輸入與按鈕狀態
             document.getElementById('inputMin').disabled = false;
             document.getElementById('inputSec').disabled = false;
             document.getElementById('startBtn').disabled = false;
