@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>修仙計時器 - 狀態鎖定版</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            min-height: 100vh; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px; gap: 20px;
+        }
+
+        @keyframes yellow-flash { 0%, 100% { background: #ffeb3b; } 50% { background: #ffd700; } }
+        @keyframes red-flash { 0%, 100% { background: #ff0000; } 50% { background: #cc0000; } }
+        body.flash-yellow { animation: yellow-flash 0.5s infinite !important; }
+        body.flash-red { animation: red-flash 0.3s infinite !important; }
+
+        .container {
+            background: rgba(255, 255, 255, 0.9); padding: 2.5rem; border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2); text-align: center; max-width: 500px; width: 100%;
+        }
+
+        #timerDisplay { font-size: 5rem; font-weight: bold; color: #2d3436; margin-bottom: 0.5rem; font-family: 'Courier New', Courier, monospace; }
+        
+        .input-group { display: flex; justify-content: center; align-items: center; gap: 10px; margin-bottom: 20px; }
+        .input-group input { width: 70px; padding: 10px; font-size: 1.2rem; border: 2px solid #dfe6e9; border-radius: 10px; text-align: center; }
+        .input-group input:disabled { background-color: #f1f2f6; color: #b2bec3; cursor: not-allowed; }
+
+        .progress-container { width: 100%; height: 15px; background-color: #dfe6e9; border-radius: 8px; margin: 20px 0; overflow: hidden; }
+        #progressFill { width: 0%; height: 100%; background-color: #6c5ce7; transition: width 0.1s linear; }
+
+        #status { padding: 1rem; border-radius: 10px; background: #f1f2f6; font-weight: bold; margin-bottom: 20px; min-height: 50px; }
+        #status.active { background-color: #ffeaa7; color: #d63031; border: 2px solid #fdcb6e; }
+
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        button { padding: 15px; font-size: 1.1rem; cursor: pointer; border: none; border-radius: 12px; transition: 0.3s; font-weight: bold; }
+        .btn-start { background-color: #2ecc71; color: white; }
+        .btn-pause { background-color: #f39c12; color: white; }
+        .btn-reset { background-color: #3498db; color: white; }
+        .btn-stop-alarm { background-color: #e74c3c; color: white; grid-column: span 2; display: none; }
+        
+        button:hover { transform: translateY(-3px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+        button:disabled { background-color: #bdc3c7; cursor: not-allowed; transform: none; }
+
+        .sound-toggle { margin-bottom: 15px; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: bold; color: #2d3436; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div id="timerDisplay">00:00</div>
+        
+        <div class="input-group">
+            <input type="number" id="inputMin" value="2" min="0">
+            <label>分</label>
+            <input type="number" id="inputSec" value="0" min="0" max="59">
+            <label>秒</label>
+        </div>
+
+        <div class="sound-toggle">
+            <input type="checkbox" id="soundToggle" checked>
+            <label for="soundToggle">啟用提醒音效</label>
+        </div>
+
+        <div class="progress-container"><div id="progressFill"></div></div>
+        
+        <div id="status">設定時間並點擊開始</div>
+
+        <div class="controls">
+            <button id="startBtn" class="btn-start" onclick="startTimer()">開始計時</button>
+            <button id="actionBtn" class="btn-reset" onclick="handleAction()">重設</button>
+            <button id="stopAlarmBtn" class="btn-stop-alarm" onclick="resetTimer()">關閉響鈴</button>
+        </div>
+    </div>
+
+    <script>
+        let countdownInterval = null;
+        let alarmInterval = null;
+        let totalSeconds = 0;
+        let remainingSeconds = 0;
+        let isRunning = false;
+        let isAlarming = false;
+        let alarmStartTime = 0;
+        const ALARM_DURATION = 5 * 60 * 1000; // 5分鐘
+
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+        function updateDisplay() {
+            const m = Math.floor(remainingSeconds / 60);
+            const s = remainingSeconds % 60;
+            document.getElementById('timerDisplay').textContent = 
+                `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+            
+            const elapsed = totalSeconds - remainingSeconds;
+            const progress = totalSeconds > 0 ? (elapsed / totalSeconds) * 100 : 0;
+            document.getElementById('progressFill').style.width = progress + '%';
+        }
+
+        function playSound(freq) {
+            try {
+                if (audioContext.state === 'suspended') audioContext.resume();
+                const osc = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+                osc.connect(gain); gain.connect(audioContext.destination);
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.1, audioContext.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+                osc.start(); osc.stop(audioContext.currentTime + 0.3);
+            } catch (e) {}
+        }
+
+        function startTimer() {
+            if (isRunning) return;
+
+            // 鎖定輸入
+            document.getElementById('inputMin').disabled = true;
+            document.getElementById('inputSec').disabled = true;
+
+            if (remainingSeconds <= 0) {
+                const min = parseInt(document.getElementById('inputMin').value) || 0;
+                const sec = parseInt(document.getElementById('inputSec').value) || 0;
+                remainingSeconds = (min * 60) + sec;
+                totalSeconds = remainingSeconds;
+            }
+
+            if (remainingSeconds <= 0) return;
+
+            isRunning = true;
+            document.getElementById('startBtn').disabled = true;
+            
+            // 切換按鈕為「暫停」
+            const actionBtn = document.getElementById('actionBtn');
+            actionBtn.textContent = "暫停";
+            actionBtn.className = "btn-pause";
+
+            document.getElementById('status').textContent = "正在計時...";
+            document.getElementById('status').classList.remove('active');
+
+            countdownInterval = setInterval(() => {
+                remainingSeconds--;
+                updateDisplay();
+                if (remainingSeconds <= 0) {
+                    clearInterval(countdownInterval);
+                    startAlarm();
+                }
+            }, 1000);
+        }
+
+        function handleAction() {
+            const actionBtn = document.getElementById('actionBtn');
+            if (actionBtn.textContent === "暫停") {
+                // 執行暫停
+                clearInterval(countdownInterval);
+                isRunning = false;
+                document.getElementById('startBtn').disabled = false;
+                actionBtn.textContent = "重設";
+                actionBtn.className = "btn-reset";
+                document.getElementById('status').textContent = "已暫停";
+            } else {
+                // 執行重設
+                resetTimer();
+            }
+        }
+
+        function startAlarm() {
+            isAlarming = true;
+            isRunning = false;
+            alarmStartTime = Date.now();
+            
+            document.getElementById('status').textContent = "時間到！響鈴中";
+            document.getElementById('status').classList.add('active');
+            
+            // 隱藏一般控制，顯示關閉響鈴
+            document.getElementById('startBtn').style.display = "none";
+            document.getElementById('actionBtn').style.display = "none";
+            document.getElementById('stopAlarmBtn').style.display = "block";
+
+            alarmInterval = setInterval(() => {
+                const elapsed = Date.now() - alarmStartTime;
+                const progress = (elapsed / ALARM_DURATION) * 100;
+
+                document.body.classList.remove('flash-yellow', 'flash-red');
+                
+                if (progress >= 75) {
+                    document.body.classList.add('flash-red');
+                    if (Math.floor(elapsed / 300) % 2 === 0 && document.getElementById('soundToggle').checked) playSound(1000);
+                } else if (progress >= 50) {
+                    document.body.classList.add('flash-yellow');
+                    if (Math.floor(elapsed / 500) % 2 === 0 && document.getElementById('soundToggle').checked) playSound(800);
+                } else {
+                    if (Math.floor(elapsed / 800) % 2 === 0 && document.getElementById('soundToggle').checked) playSound(600);
+                }
+
+                if (elapsed >= ALARM_DURATION) resetTimer();
+            }, 100);
+        }
+
+        function resetTimer() {
+            clearInterval(countdownInterval);
+            clearInterval(alarmInterval);
+            
+            isRunning = false;
+            isAlarming = false;
+            remainingSeconds = 0;
+            totalSeconds = 0;
+
+            // 恢復輸入與按鈕狀態
+            document.getElementById('inputMin').disabled = false;
+            document.getElementById('inputSec').disabled = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('startBtn').style.display = "block";
+            
+            const actionBtn = document.getElementById('actionBtn');
+            actionBtn.style.display = "block";
+            actionBtn.textContent = "重設";
+            actionBtn.className = "btn-reset";
+            
+            document.getElementById('stopAlarmBtn').style.display = "none";
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('timerDisplay').textContent = "00:00";
+            document.getElementById('status').textContent = "設定時間並點擊開始";
+            document.getElementById('status').classList.remove('active');
+            
+            document.body.classList.remove('flash-yellow', 'flash-red');
+            document.body.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+        }
+    </script>
+</body>
+</html>
